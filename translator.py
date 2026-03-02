@@ -3,7 +3,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, MarianMTModel, MarianTokenizer
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, MarianMTModel, MarianTokenizer, AutoModelForCausalLM
 import torch
 import time
 import sys
@@ -134,6 +134,73 @@ def round_trip_translate_2(text):
         'step_times': [t1, t2, t3, t4]
     }
 
+# Qwen2.5-3B model for English-Korean translation (loaded on demand)
+model_name_4 = "Qwen/Qwen2.5-3B"
+tokenizer_4 = None
+model_4 = None
+
+def load_model_4():
+    """Load Qwen2.5-3B model on demand."""
+    global tokenizer_4, model_4
+    if tokenizer_4 is None:
+        print("Loading Qwen2.5-3B model...")
+        tokenizer_4 = AutoTokenizer.from_pretrained(model_name_4)
+        model_4 = AutoModelForCausalLM.from_pretrained(model_name_4, torch_dtype=torch.float16)
+
+def translate_4(text, src_lang, tgt_lang):
+    """Translate text using Qwen2.5-3B model with prompt."""
+    load_model_4()
+    
+    # Map language codes to language names
+    lang_map = {"eng_Latn": "English", "kor_Hang": "Korean"}
+    src_name = lang_map[src_lang]
+    tgt_name = lang_map[tgt_lang]
+    
+    prompt = f"Translate the following {src_name} text to {tgt_name}:\n{src_name}: {text}\n{tgt_name}:"
+    
+    inputs = tokenizer_4(prompt, return_tensors="pt")
+    start_time = time.time()
+    outputs = model_4.generate(
+        **inputs,
+        max_new_tokens=256,
+        temperature=0.3,
+        top_p=0.9,
+        do_sample=False
+    )
+    elapsed_time = time.time() - start_time
+    
+    # Extract only the generated part (not the prompt)
+    generated = tokenizer_4.decode(outputs[0][len(inputs['input_ids'][0]):], skip_special_tokens=True)
+    return generated.strip(), elapsed_time
+
+def english_to_korean_4(text):
+    """Translate English to Korean using Qwen2.5-3B."""
+    result, elapsed = translate_4(text, ENG_CODE, KOR_CODE)
+    return result, elapsed
+
+def korean_to_english_4(text):
+    """Translate Korean to English using Qwen2.5-3B."""
+    result, elapsed = translate_4(text, KOR_CODE, ENG_CODE)
+    return result, elapsed
+
+def round_trip_translate_4(text):
+    """Perform round-trip translation using Qwen2.5-3B."""
+    start_time = time.time()
+    korean1, t1 = english_to_korean_4(text)
+    english1, t2 = korean_to_english_4(korean1)
+    korean2, t3 = english_to_korean_4(english1)
+    english2, t4 = korean_to_english_4(korean2)
+    end_time = time.time()
+    return {
+        'original': text,
+        'korean1': korean1,
+        'english1': english1,
+        'korean2': korean2,
+        'final': english2,
+        'elapsed_time': end_time - start_time,
+        'step_times': [t1, t2, t3, t4]
+    }
+
 def compute_semantic_similarity(text1, text2):
     """
     Compute semantic similarity between two texts using cosine similarity.
@@ -259,10 +326,22 @@ def main():
         print(f"→ Final English: {result_3['final']}")
         print(f"Similarity: {similarity_3:.4f}")
         print(f"Model running time: {sum(result_3['step_times']):.2f} seconds")
+    elif model_choice == "4":
+        # Qwen2.5-3B model
+        print("\n=== Qwen2.5-3B Model (Qwen/Qwen2.5-3B) ===")
+        result_4 = round_trip_translate_4(test_text)
+        similarity_4 = compute_semantic_similarity(result_4['original'], result_4['final'])
+        print(f"Original English: {result_4['original']}")
+        print(f"→ Korean 1: {result_4['korean1']}")
+        print(f"→ English 1: {result_4['english1']}")
+        print(f"→ Korean 2: {result_4['korean2']}")
+        print(f"→ Final English: {result_4['final']}")
+        print(f"Similarity: {similarity_4:.4f}")
+        print(f"Model running time: {sum(result_4['step_times']):.2f} seconds")
     else:
         print(f"Invalid model choice: {model_choice}")
         print("Usage: python translator.py <model> [text]")
-        print("  <model>: 1 for NLLB, 2 for M2M100, 3 for Helsinki-NLP")
+        print("  <model>: 1 for NLLB-600M, 2 for M2M100, 3 for NLLB-1.3B, 4 for Qwen2.5-3B")
         print("  [text]: optional text to translate (default provided if omitted)")
 
 if __name__ == "__main__":
